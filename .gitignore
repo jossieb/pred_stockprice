@@ -40,3 +40,5 @@ useragents.txt
 yfinance.cache
 .vscode/launch.json
 untitled_project/training_vx.py
+.gitignore
+test_yf.py
