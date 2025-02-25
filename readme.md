@@ -44,3 +44,10 @@ pip install -r requirements.txt
     parameters: symbool / AAPL (voorbeeld) <br>
                 data / local of yahoo <br>
                 run / Xe run nummer in het JSON bestand model_vars.json<br> 
+<br>
+- get_data.py<br>
+    Haalt de meest recente Yahoo data op voor een specifiek symbool (bv AAPL).<br>
+    Handig bij het testen zodat je niet meerdere keren op een dag de yahoo data hoeft op te halen<br>
+    Na de yahoo data opgehaald te hebben kan je vervolgens bij het trainen de parameter local gebruiken<br>
+    Aanroep:    python predict.py <br>
+    parameter(s): symbool / AAPL (voorbeeld) <br>
