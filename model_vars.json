@@ -1,0 +1,70 @@
+{
+  "model_vars": {
+    "run1": [
+      {
+        "key": "run",
+        "value\r": "1\r"
+      },
+      {
+        "key": "weight",
+        "value\r": "-0.2\r"
+      },
+      {
+        "key": "rows",
+        "value\r": "800\r"
+      },
+      {
+        "key": "thresh",
+        "value\r": "3\r"
+      },
+      {
+        "key": "seq_length",
+        "value\r": "30\r"
+      },
+      {
+        "key": "noise",
+        "value\r": "0.01\r"
+      },
+      {
+        "key": "dropout",
+        "value\r": "0.4\r"
+      },
+      {
+        "key": "learning_rate",
+        "value\r": "0.0001\r"
+      },
+      {
+        "key": "test_size",
+        "value\r": "0.2\r"
+      },
+      {
+        "key": "max_trials",
+        "value\r": "10\r"
+      },
+      {
+        "key": "executions_per_trial",
+        "value\r": "2\r"
+      },
+      {
+        "key": "patience",
+        "value\r": "10\r"
+      },
+      {
+        "key": "factor",
+        "value\r": "0.5\r"
+      },
+      {
+        "key": "min_lr",
+        "value\r": "0.000001\r"
+      },
+      {
+        "key": "epochs",
+        "value\r": "50\r"
+      },
+      {
+        "key": "batch_size",
+        "value\r": "16\r"
+      }
+    ]
+  }
+}
