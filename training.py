@@ -101,9 +101,7 @@ def load_data(symbol, data_type):
         print(f"Data retrieved from: {data_path}")
     else:
         stock = yf.Ticker(symbol)
-        end_date = date.today()
-        start_date = end_date - timedelta(days=1000)
-        data = stock.history(start=start_date, end=end_date)
+        data = stock.history(period="max")
         data.columns = data.columns.str.lower()
         data.index = pd.to_datetime(data.index)
         data = data.sort_index()
@@ -122,33 +120,29 @@ def add_technical_indicators(data):
     """Add technical indicators to the DataFrame."""
     if len(data) < 52:
         raise ValueError("Not enough data to calculate technical indicators")
-
-    indicators = {
-        "obv": talib.OBV(data["close"], data["volume"]),
-        "rsi": talib.RSI(data["close"], timeperiod=14),
-        "macd": talib.MACD(data["close"], fastperiod=12, slowperiod=26, signalperiod=9)[
-            0
-        ],
-        "adx": talib.ADX(data["high"], data["low"], data["close"], timeperiod=14),
-        "sma_14": talib.SMA(data["close"], timeperiod=14),
-        "ema_14": talib.EMA(data["close"], timeperiod=14),
-        "bollinger_high": talib.BBANDS(
+    else:
+        data["obv"] = talib.OBV(data["close"], data["volume"])
+        data["rsi"] = talib.RSI(data["close"], timeperiod=14)
+        data["macd"] = talib.MACD(
+            data["close"], fastperiod=12, slowperiod=26, signalperiod=9
+        )[0]
+        data["adx"] = talib.ADX(data["high"], data["low"], data["close"], timeperiod=14)
+        data["sma_14"] = talib.SMA(data["close"], timeperiod=14)
+        data["ema_14"] = talib.EMA(data["close"], timeperiod=14)
+        data["bollinger_high"] = talib.BBANDS(
             data["close"], timeperiod=14, nbdevup=2, nbdevdn=2, matype=0
-        )[0],
-        "bollinger_low": talib.BBANDS(
+        )[0]
+        data["bollinger_low"] = talib.BBANDS(
             data["close"], timeperiod=14, nbdevup=2, nbdevdn=2, matype=0
-        )[2],
-        "stoch_oscillator": talib.STOCH(
+        )[2]
+        data["stoch_oscillator"] = talib.STOCH(
             data["high"],
             data["low"],
             data["close"],
             fastk_period=14,
             slowk_period=3,
             slowd_period=3,
-        )[0],
-    }
-
-    data = data.assign(**indicators).fillna(method="bfill").fillna(method="ffill")
+        )[0]
 
     return data
 
@@ -178,7 +172,7 @@ def build_model(hp):
     x = Attention()([x, x])
     x = Dropout(mydropout)(x)
     x = LSTM(hp.Int("units2", 32, 128, step=32))(x)
-    outputs = Dense(1, kernel_regularizer=l2(0.03))(x)
+    outputs = Dense(1, kernel_regularizer=l2(0.01))(x)
 
     model = tf.keras.models.Model(inputs, outputs)
     model.compile(
@@ -241,7 +235,7 @@ def main():
         mybatch_size,
     ) = params.values()
 
-    data = load_data(symbol, data_type)
+    data = load_data(symbol, data_type, myrows)
     data = add_technical_indicators(data)
     data["daily_return"] = data["close"].pct_change()
 

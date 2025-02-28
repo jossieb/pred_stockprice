@@ -42,3 +42,5 @@ yfinance.cache
 untitled_project/training_vx.py
 .gitignore
 test_yf.py
+__pycache__/local.cpython-312.pyc
+~$rategieën om overfitting te verminderen.docx

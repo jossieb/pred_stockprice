@@ -37,10 +37,7 @@ if not symbol:
 
 # Load data from Yahoo
 stock = yf.Ticker(symbol)  # Use yfinance to get more data
-end_date = date.today()
-start_date = end_date - timedelta(days=2000)
-data = stock.history(start=start_date, end=end_date)
-
+data = stock.history(period="max")
 data = pd.DataFrame(data)
 data.columns = data.columns.str.lower()  # Ensure all column names are lowercase
 data.index = pd.to_datetime(data.index)

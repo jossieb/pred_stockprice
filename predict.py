@@ -20,6 +20,7 @@ import os
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
+from datetime import datetime, date, timedelta
 import sys
 import argparse
 import numpy as np
@@ -27,7 +28,6 @@ import pandas as pd
 import talib
 import joblib
 import yfinance as yf
-from datetime import date, timedelta
 from sklearn.preprocessing import RobustScaler
 import tensorflow as tf
 from tensorflow.keras.saving import register_keras_serializable
@@ -48,56 +48,77 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def load_data(symbol, data_type):
+# Load parameters from JSON
+def load_parameters(run_nr):
+    """Load parameters for the specified run from a JSON file."""
+    with open("model_vars.json", "r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    run_key = f"run{run_nr}"
+    try:
+        run_data = data["model_vars"][run_key]
+        params = {}
+        for item in run_data:
+            key = item["key"]
+            value = item["value\r"].strip()
+            try:
+                if "." in value:
+                    params[key] = float(value)
+                else:
+                    params[key] = int(value)
+            except ValueError:
+                params[key] = value  # Keep as string if it cannot be converted
+        return params
+    except KeyError:
+        print(f"Run {run_key} not defined in JSON file.")
+        sys.exit(1)
+
+
+def load_data(symbol, data_type, myrows):
     """Load stock data from either local storage or Yahoo Finance."""
     if data_type == "local":
         data_path = os.path.join(local.dfolder, f"{symbol}_{local.csvfile}")
         data = pd.read_csv(data_path)
+        data.columns = data.columns.str.lower()
         print(f"Data retrieved from: {data_path}")
     else:
         stock = yf.Ticker(symbol)
-        end_date = date.today()
-        start_date = end_date - timedelta(days=1000)
-        data = stock.history(start=start_date, end=end_date)
+        data = stock.history(period="max")
         data.columns = data.columns.str.lower()
         data.index = pd.to_datetime(data.index)
         data = data.sort_index()
         print("Data retrieved from Yahoo Finance")
-    return data
+
+    return data.tail(myrows)
 
 
 def add_technical_indicators(data):
     """Add technical indicators to the DataFrame."""
     if len(data) < 52:
         raise ValueError("Not enough data to calculate technical indicators")
-
-    indicators = {
-        "obv": talib.OBV(data["close"], data["volume"]),
-        "rsi": talib.RSI(data["close"], timeperiod=14),
-        "macd": talib.MACD(data["close"], fastperiod=12, slowperiod=26, signalperiod=9)[
-            0
-        ],
-        "adx": talib.ADX(data["high"], data["low"], data["close"], timeperiod=14),
-        "sma_14": talib.SMA(data["close"], timeperiod=14),
-        "ema_14": talib.EMA(data["close"], timeperiod=14),
-        "bollinger_high": talib.BBANDS(
+    else:
+        data["obv"] = talib.OBV(data["close"], data["volume"])
+        data["rsi"] = talib.RSI(data["close"], timeperiod=14)
+        data["macd"] = talib.MACD(
+            data["close"], fastperiod=12, slowperiod=26, signalperiod=9
+        )[0]
+        data["adx"] = talib.ADX(data["high"], data["low"], data["close"], timeperiod=14)
+        data["sma_14"] = talib.SMA(data["close"], timeperiod=14)
+        data["ema_14"] = talib.EMA(data["close"], timeperiod=14)
+        data["bollinger_high"] = talib.BBANDS(
             data["close"], timeperiod=14, nbdevup=2, nbdevdn=2, matype=0
-        )[0],
-        "bollinger_low": talib.BBANDS(
+        )[0]
+        data["bollinger_low"] = talib.BBANDS(
             data["close"], timeperiod=14, nbdevup=2, nbdevdn=2, matype=0
-        )[2],
-        "stoch_oscillator": talib.STOCH(
+        )[2]
+        data["stoch_oscillator"] = talib.STOCH(
             data["high"],
             data["low"],
             data["close"],
             fastk_period=14,
             slowk_period=3,
             slowd_period=3,
-        )[0],
-    }
-
-    data = data.assign(**indicators).bfill().ffill()
-    # data = data.assign(**indicators).fillna(method="bfill").fillna(method="ffill") #deprecated
+        )[0]
 
     return data
 
@@ -114,40 +135,19 @@ def preprocess_data(data, scaler, features, seq_length):
     return np.array(x), np.array(y)
 
 
-# Haal de waarde van "weight" op
-def get_value_by_key(run_data, key):
-    """Haal de waarde op voor een gegeven key uit de run-data."""
-    for item in run_data:
-        if item["key"] == key:
-            return item["value\r"].strip()  # Verwijder \r en spaties
-    return None
-
-
 @register_keras_serializable()
 def weighted_mse_exp(y_true, y_pred):
-    global run_nr  # Declare run_nr as global to access it inside this function
-
-    # Parse de JSON-data
-    with open("model_vars.json", "r", encoding="utf-8") as file:
-        data = json.load(file)
-
-    # Navigeer naar de run-data
-    run_key = f"run{run_nr}"
-    run_data = data["model_vars"][run_key]
-
-    # Haal de waarde van "weight" op
-    weight_value = get_value_by_key(run_data, "weight")
+    global run_nr, myweight
 
     # Converteer naar float
-    if weight_value is not None:
-        weight_value = float(weight_value)
-        print(f"Value of 'weight' is: {weight_value}")
+    if myweight is not None:
+        myweight = float(myweight)
     else:
         print("Key 'weight' not found in JSON file.")
 
     """Custom loss function with exponential weighting for recent data."""
     seq_length = tf.shape(y_true)[0]
-    weights = tf.exp(weight_value * tf.range(seq_length, dtype=tf.float32))
+    weights = tf.exp(myweight * tf.range(seq_length, dtype=tf.float32))
     return tf.reduce_mean(weights * tf.square(y_true - y_pred))
 
 
@@ -166,9 +166,8 @@ def load_model_and_scaler(symbol, run_nr):
     return model, scaler
 
 
-def generate_predictions(model, scaler, x, y, seq_length):
-    global symbol
-    global features
+def generate_predictions(model, scaler, x, y, next_working_day, seq_length):
+    global symbol, features
 
     """Make predictions"""
 
@@ -183,14 +182,6 @@ def generate_predictions(model, scaler, x, y, seq_length):
         :, features.index("close")
     ]
 
-    # Get the last date from the data
-    today = date.today()
-
-    # Calculate the next working day
-    next_working_day = today + timedelta(days=1)
-    while next_working_day.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
-        next_working_day += timedelta(days=1)
-
     # Save predictions to CSV
     predictions_df = pd.DataFrame(
         {
@@ -201,8 +192,9 @@ def generate_predictions(model, scaler, x, y, seq_length):
     )
 
     print(
-        "Predicted price for the next working day: ",
+        "Predicted price for the next working day:",
         [next_working_day],
+        "Eur:",
         predictions_rescaled[-1],
     )
 
@@ -223,9 +215,7 @@ def generate_predictions(model, scaler, x, y, seq_length):
 
 def main():
     # Declare run_nr, symbol and features as global to access it inside other functions
-    global run_nr
-    global symbol
-    global features
+    global run_nr, symbol, features, myweight
 
     args = parse_arguments()
     symbol, data_type, run_nr = args.symbol, args.data_type, args.run_nr
@@ -238,7 +228,28 @@ def main():
         f"Execute prediction for -> Symbol: {symbol}, Type: {data_type}, Run: {run_nr}"
     )
 
-    data = load_data(symbol, data_type)
+    params = load_parameters(run_nr)
+    
+    (
+        myrun,
+        myweight,
+        myrows,
+        mytresh,
+        myseq_length,
+        mynoise,
+        mydropout,
+        mylearning_rate,
+        mytest_size,
+        mymax_trials,
+        myexecutions_per_trial,
+        mypatience,
+        myfactor,
+        mymin_lr,
+        myepochs,
+        mybatch_size,
+    ) = params.values()
+
+    data = load_data(symbol, data_type, myrows)
     data = add_technical_indicators(data)
     data["daily_return"] = data["close"].pct_change()
 
@@ -258,7 +269,28 @@ def main():
 
     model, scaler = load_model_and_scaler(symbol, run_nr)
     x, y = preprocess_data(data, scaler, features, seq_length=40)
-    predicted_close = generate_predictions(model, scaler, x, y, seq_length=40)
+
+    # Get the last date from the data
+    most_recent_date = data["date"].max()
+    print(f"Most recent stock date in file:", most_recent_date)
+    # Converteer de string naar een datetime-object
+    most_recent_date = datetime.strptime(most_recent_date, "%Y-%m-%d %H:%M:%S%z")
+
+    # Calculate the next working day
+    next_working_day = most_recent_date + timedelta(days=1)
+    while next_working_day.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        next_working_day += timedelta(days=1)
+    # Converteer de nieuwe datum naar een string in het formaat %Y-%m-%d
+    next_working_day_str = next_working_day.strftime("%Y-%m-%d")
+
+    generate_predictions(
+        model,
+        scaler,
+        x,
+        y,
+        next_working_day_str,
+        seq_length=40,
+    )
 
 
 if __name__ == "__main__":

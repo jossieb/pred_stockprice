@@ -11,7 +11,7 @@
       },
       {
         "key": "rows",
-        "value\r": "800\r"
+        "value\r": "2000\r"
       },
       {
         "key": "thresh",
@@ -27,7 +27,7 @@
       },
       {
         "key": "dropout",
-        "value\r": "0.4\r"
+        "value\r": "0.5\r"
       },
       {
         "key": "learning_rate",
@@ -47,11 +47,11 @@
       },
       {
         "key": "patience",
-        "value\r": "10\r"
+        "value\r": "3\r"
       },
       {
         "key": "factor",
-        "value\r": "0.5\r"
+        "value\r": "0.1\r"
       },
       {
         "key": "min_lr",
@@ -59,11 +59,11 @@
       },
       {
         "key": "epochs",
-        "value\r": "50\r"
+        "value\r": "100\r"
       },
       {
         "key": "batch_size",
-        "value\r": "16\r"
+        "value\r": "64\r"
       }
     ]
   }
