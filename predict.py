@@ -5,7 +5,7 @@ and generates predictions for stock prices.
 
 Author: Jos van der Have aka jossieb
 Date: 2025 Q1
-Version: 4.0 25-02-2025
+Version: 5.0 03-03-2025
 License: MIT
 Example: python predict.py DGTL.MI local 1
 """
@@ -33,7 +33,7 @@ import tensorflow as tf
 from tensorflow.keras.saving import register_keras_serializable
 import local
 import json
-
+import get_news
 
 def parse_arguments():
     """Parse command-line arguments for stock symbol, data type, and run number."""
@@ -76,18 +76,42 @@ def load_parameters(run_nr):
 
 def load_data(symbol, data_type, myrows):
     """Load stock data from either local storage or Yahoo Finance."""
+    data_path = os.path.join(local.dfolder, f"{symbol}_{local.csvfile}")
+    sent2_path = os.path.join(local.dfolder, f"{symbol}_avg_{local.sentfile}")
+    # add latest news sentiment
+    items = 1000
+    get_news.yf_news(symbol, items)
+    avg_sent = pd.read_csv(sent2_path)
+
     if data_type == "local":
-        data_path = os.path.join(local.dfolder, f"{symbol}_{local.csvfile}")
         data = pd.read_csv(data_path)
-        data.columns = data.columns.str.lower()
+        # Werk de bestaande DataFrame bij met waarden uit news_sent
+        data.update(avg_sent)
+        data["sentiment"] = data["sentiment"].fillna(0)
+        data.to_csv(data_path, index=False)
         print(f"Data retrieved from: {data_path}")
     else:
         stock = yf.Ticker(symbol)
         data = stock.history(period="max")
+        data = data.reset_index()
         data.columns = data.columns.str.lower()
-        data.index = pd.to_datetime(data.index)
-        data = data.sort_index()
+        data["date"] = data["date"].dt.date
+        # save the data to a CSV
+        data.to_csv(data_path)
         print("Data retrieved from Yahoo Finance")
+
+        # Voeg de DataFrames samen op basis van de datum
+        avg_sent["pub_date"] = pd.to_datetime(avg_sent["pub_date"])
+        data["date"] = pd.to_datetime(data["date"])
+        # Verwijder tijdzone-informatie (als deze aanwezig is)
+        avg_sent["pub_date"] = avg_sent["pub_date"].dt.tz_localize(None)
+        data["date"] = data["date"].dt.tz_localize(None)
+        data = pd.merge(data, avg_sent, left_on="date", right_on="pub_date", how="left")
+        # Verwijder de overbodige kolom 'pub_date' (deze is nu gelijk aan 'date')
+        data = data.drop(columns=["pub_date"])
+        data["sentiment"] = data["sentiment"].fillna(0)
+        # sla de nieuwe file op
+        data.to_csv(data_path, index=False)
 
     return data.tail(myrows)
 
@@ -229,7 +253,7 @@ def main():
     )
 
     params = load_parameters(run_nr)
-    
+
     (
         myrun,
         myweight,
@@ -265,30 +289,32 @@ def main():
         "bollinger_high",
         "bollinger_low",
         "stoch_oscillator",
+        "sentiment",
     ]
 
     model, scaler = load_model_and_scaler(symbol, run_nr)
     x, y = preprocess_data(data, scaler, features, seq_length=40)
 
     # Get the last date from the data
+    data = data.reset_index()  # use date as regular column to get the last one in
     most_recent_date = data["date"].max()
     print(f"Most recent stock date in file:", most_recent_date)
     # Converteer de string naar een datetime-object
-    most_recent_date = datetime.strptime(most_recent_date, "%Y-%m-%d %H:%M:%S%z")
+    # Verwijder de tijdcomponent
+    most_recent_date_str = str(most_recent_date).split()[0]
+    most_recent_date = datetime.strptime(str(most_recent_date_str), "%Y-%m-%d")
 
     # Calculate the next working day
     next_working_day = most_recent_date + timedelta(days=1)
     while next_working_day.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
         next_working_day += timedelta(days=1)
-    # Converteer de nieuwe datum naar een string in het formaat %Y-%m-%d
-    next_working_day_str = next_working_day.strftime("%Y-%m-%d")
 
     generate_predictions(
         model,
         scaler,
         x,
         y,
-        next_working_day_str,
+        next_working_day,
         seq_length=40,
     )
 

@@ -6,7 +6,7 @@ The best model and scaler are saved for future use.
 
 Author: Jos van der Have aka jossieb
 Date: 2025 Q1
-Version: 4.0 / 25-02-2025
+Version: 5.0 / 03-03-2025
 License: MIT
 Example: python training.py DGTL.MI local 1
 """
@@ -14,6 +14,10 @@ Example: python training.py DGTL.MI local 1
 import sys
 import warnings
 import os
+# Suppress warnings and TensorFlow logging
+warnings.filterwarnings("ignore")
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 import argparse
 import json
 import joblib
@@ -31,14 +35,12 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.saving import register_keras_serializable
+from tensorflow.keras.layers import Concatenate
+from tensorflow.keras.layers import Add
 from kerastuner.tuners import RandomSearch
 import tensorflow as tf
 import local
-
-# Suppress warnings and TensorFlow logging
-warnings.filterwarnings("ignore")
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+import get_news
 
 
 # Parse command-line arguments
@@ -93,26 +95,47 @@ def weighted_mse_exp(y_true, y_pred):
 
 
 # Load stock data
-def load_data(symbol, data_type):
+def load_data(symbol, data_type, rows):
     """Load stock data from either local storage or Yahoo Finance."""
+    data_path = os.path.join(local.dfolder, f"{symbol}_{local.csvfile}")
+    sent2_path = os.path.join(local.dfolder, f"{symbol}_avg_{local.sentfile}")
+
     if data_type == "local":
-        data_path = os.path.join(local.dfolder, f"{symbol}_{local.csvfile}")
         data = pd.read_csv(data_path)
-        print(f"Data retrieved from: {data_path}")
+        print("Data retrieved from local")
     else:
+        # add latest news sentiment
+        items = 1000
+        get_news.yf_news(symbol, items)
+        avg_sent = pd.read_csv(sent2_path)
         stock = yf.Ticker(symbol)
         data = stock.history(period="max")
+        data = data.reset_index()
         data.columns = data.columns.str.lower()
-        data.index = pd.to_datetime(data.index)
-        data = data.sort_index()
-        print("Data retrieved from Yahoo Finance")
+        data["date"] = data["date"].dt.date
         # save the data to a CSV
-        
-        myfile = symbol + "_" + local.csvfile
-        data.to_csv(os.path.join(local.dfolder, myfile), index=True)
-        print(f"Data saved to: {os.path.join(local.dfolder, myfile)}")
+        data.to_csv(data_path)
+        print("Data retrieved from Yahoo Finance")
 
-    return data.tail(myrows)
+        # Voeg de DataFrames samen op basis van de datum
+        avg_sent["pub_date"] = pd.to_datetime(avg_sent["pub_date"])
+        data["date"] = pd.to_datetime(data["date"])
+        # Verwijder tijdzone-informatie (als deze aanwezig is)
+        avg_sent["pub_date"] = avg_sent["pub_date"].dt.tz_localize(None)
+        data["date"] = data["date"].dt.tz_localize(None)
+        data = pd.merge(data, avg_sent, left_on="date", right_on="pub_date", how="left")
+        # Verwijder de overbodige kolom 'pub_date' (deze is nu gelijk aan 'date')
+        data = data.drop(columns=["pub_date"])
+        data["sentiment"] = data["sentiment"].fillna(0)
+        # sla de nieuwe file op
+        data.to_csv(data_path, index=False)
+
+    if data.empty:
+        raise ValueError(
+            "The dataset is empty after loading. Please check the data source and parameters."
+        )
+
+    return data.tail(rows)
 
 
 # Add technical indicators to the data
@@ -161,6 +184,12 @@ def preprocess_data(data, seq_length):
         x.append(data_scaled_noisy[i : i + seq_length])
         y.append(data_scaled_noisy[i + seq_length, features.index("close")])
 
+    # Check if the dataset is empty after preprocessing
+    if len(x) == 0 or len(y) == 0:
+        raise ValueError(
+            "The dataset is empty after preprocessing. Please check the data and preprocessing steps."
+        )
+
     return np.array(x), np.array(y), scaler
 
 
@@ -168,15 +197,27 @@ def preprocess_data(data, seq_length):
 def build_model(hp):
     """Build an LSTM model with hyperparameters for tuning."""
     inputs = Input(shape=(40, len(features)))
-    x = LSTM(hp.Int("units1", 50, 256, step=64), return_sequences=True)(inputs)
-    x = Attention()([x, x])
-    x = Dropout(mydropout)(x)
-    x = LSTM(hp.Int("units2", 32, 128, step=32))(x)
-    outputs = Dense(1, kernel_regularizer=l2(0.01))(x)
+    x1 = LSTM(hp.Int("units1", 50, 256, step=64), return_sequences=True)(inputs)
+    x1 = Attention()([x1, x1])
+    x1 = Dropout(mydropout)(x1)
+
+    x2 = LSTM(hp.Int("units2", 32, 128, step=32))(x1)
+    # Feature engineering laag (optioneel)
+    market_features = Dense(32, activation="relu")(
+        inputs[:, -1, :]
+    )  # Gebruik laatste tijdstap
+    # Combineer LSTM output met market features
+    combined = Concatenate()([x2, market_features])
+
+    skip_connection = Dense(combined.shape[-1])(
+        inputs[:, -1, :]
+    )  # Project input naar juiste dimensie
+    enhanced = Add()([combined, skip_connection])  # Skip connection
+    outputs = Dense(1, kernel_regularizer=l2(0.01))(enhanced)
 
     model = tf.keras.models.Model(inputs, outputs)
     model.compile(
-        optimizer=Adam(learning_rate=hp.Float("lr", mylearning_rate, 1e-3)),
+        optimizer=Adam(learning_rate=hp.Float("lr", mylearning_rate, 1e-2)),
         loss=weighted_mse_exp,
         metrics=["mse"],
     )
@@ -252,6 +293,7 @@ def main():
         "bollinger_high",
         "bollinger_low",
         "stoch_oscillator",
+        "sentiment",
     ]
 
     x, y, scaler = preprocess_data(data, seq_length=40)
