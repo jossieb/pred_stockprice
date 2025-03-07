@@ -26,11 +26,10 @@ In bijgaande blog houd ik de ontwikkeling van het model bij.<br>
 **Requirements**<br>
 pip install -r requirements.txt
 
-**Huidige versie 4**<br>
-De DeepSeek beoordeling van het model. Het model toont de training en validatieverlies (loss) over verschillende epochs. Hier zijn enkele observaties en beoordelingen:<br>
-- Trend van de Loss: Zowel de training als de validatieverlies nemen af naarmate het aantal epochs toeneemt. Dit is een goed teken, omdat het aangeeft dat het model leert en beter presteert op zowel de trainings- als de validatiedata.<br>
-- Overfitting: Er lijkt geen duidelijke overfitting te zijn, omdat de validatieverlies niet significant begint te stijgen terwijl de trainingverlies blijft dalen. Overfitting zou zich manifesteren als een toenemende validatieverlies terwijl de trainingverlies blijft dalen.<br>
-- Convergentie: De verlieswaarden lijken te convergeren naar een bepaald punt, wat aangeeft dat het model een stabiel niveau van prestaties bereikt. Dit is positief, omdat het suggereert dat het model niet verder hoeft te worden getraind om betere resultaten te behalen.<br>
+**Huidige versie 5**<br>
+Zie de bijbehorende blog voor de laatste stand van zaken.
+[Link naar blog](https://www.stillhaveit.nl/blog_stock)
+<br>
 <br>
 **De onderdelen**<br>
 - training.py<br>
@@ -71,9 +70,12 @@ De DeepSeek beoordeling van het model. Het model toont de training en validatiev
     Haalt de titels van nieuws items op bij yahoo met als zoekgegeven een specifiek symbool (bv AAPL). Op basis van
     de totel wordt vervolgens het sentiment (-1 tot 1) bepaald. Daarna wordt het gemiddelde sentiment van een dag
     bepaald over de opgehaalde nieuwsitems. Het gemiddelde sentiment wordt als indicator toegevoegd aan de stock_data.csv en gebruikt in het model. De opgehaalde items worden toegevoegd aan een lokale csv file (news_sentiment.csv) Deze methode is niet ideaal maar de inhoud van de nieuwsitems is niet gratis op te halen helaas.<br>
-    <b>Deze nieuws sentiment functionaliteit is nog steeds 'work in progress'. In het huidige model heeft het nog geen effect.</b><br>
+    <b>Deze nieuws sentiment functionaliteit is nog steeds 'work in progress'. In het huidige model heeft het nog weinig effect.</b><br>
     Aanroep:    python get_news.py <br>
     parameter(s):   symbool / <br>
                     aantal nieuwsitems / hoeveelheid nieuws dat wordt opgehaald<br>
-
 <br>
+- plot_predict.py<br>
+    Plot de voorspelde en werkelijke waarde van de tickerkoers.<br>
+    Aanroep:        python plot_predit.py <br>
+    parameter(s):   geen<br>

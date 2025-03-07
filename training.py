@@ -197,11 +197,12 @@ def preprocess_data(data, seq_length):
 def build_model(hp):
     """Build an LSTM model with hyperparameters for tuning."""
     inputs = Input(shape=(40, len(features)))
-    x1 = LSTM(hp.Int("units1", 50, 256, step=64), return_sequences=True)(inputs)
+    x1 = LSTM(hp.Int("units1", 32, 512, step=32), return_sequences=True, kernel_regularizer=l2(0.01) )(inputs)
     x1 = Attention()([x1, x1])
-    x1 = Dropout(mydropout)(x1)
+    dropout_rate = hp.Float("dropout", 0.1, 0.5, step=0.1)
+    x1 = Dropout(dropout_rate)(x1)
 
-    x2 = LSTM(hp.Int("units2", 32, 128, step=32))(x1)
+    x2 = LSTM(hp.Int("units2", 16, 256, step=32), kernel_regularizer=l2(0.01) )(x1)
     # Feature engineering laag (optioneel)
     market_features = Dense(32, activation="relu")(
         inputs[:, -1, :]

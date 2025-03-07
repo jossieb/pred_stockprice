@@ -71,7 +71,7 @@ def load_parameters(run_nr):
         return params
     except KeyError:
         print(f"Run {run_key} not defined in JSON file.")
-        sys.exit(1)
+        sys.exit(3)
 
 
 def load_data(symbol, data_type, myrows):
@@ -182,7 +182,7 @@ def load_model_and_scaler(symbol, run_nr):
 
     if not os.path.exists(model_path) or not os.path.exists(scaler_path):
         print(f"Model or scaler not found for symbol {symbol} and run {run_nr}.")
-        sys.exit(1)
+        sys.exit(4)
 
     custom_objects = {"weighted_mse_exp": weighted_mse_exp}
     model = tf.keras.models.load_model(model_path, custom_objects=custom_objects)
@@ -222,17 +222,19 @@ def generate_predictions(model, scaler, x, y, next_working_day, seq_length):
         predictions_rescaled[-1],
     )
 
-    if not os.path.exists(os.path.join(local.dfolder, local.predfile)):
-        predictions_df.to_csv(os.path.join(local.dfolder, local.predfile), index=False)
+    pred_path = os.path.join(local.dfolder, f"{symbol}_{local.predfile}")
+
+    if not os.path.exists(pred_path):
+        predictions_df.to_csv(pred_path, index=False)
 
     else:
         predictions_df.to_csv(
-            os.path.join(local.dfolder, local.predfile),
+            os.path.join(pred_path),
             mode="a",
             header=False,
             index=False,
         )
-    print(f"Prediction saved to: {os.path.join(local.dfolder, local.predfile)}")
+    print(f"Prediction saved to: {pred_path}")
 
     return predictions_rescaled[-1]
 
@@ -247,6 +249,12 @@ def main():
     if not all([symbol, data_type, run_nr]):
         print("Please provide all required arguments: symbol, data_type, and run_nr.")
         sys.exit(1)
+
+    if data_type == "local":
+        data_path = os.path.join(local.dfolder, f"{symbol}_{local.csvfile}")
+        if not os.path.exists(data_path):
+            print(f"Local file {data_path} not found.")
+            sys.exit(2)
 
     print(
         f"Execute prediction for -> Symbol: {symbol}, Type: {data_type}, Run: {run_nr}"
