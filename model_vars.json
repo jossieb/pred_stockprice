@@ -7,7 +7,7 @@
       },
       {
         "key": "weight",
-        "value\r": "-0.2\r"
+        "value\r": "0.5\r"
       },
       {
         "key": "rows",
@@ -39,7 +39,7 @@
       },
       {
         "key": "max_trials",
-        "value\r": "10\r"
+        "value\r": "6\r"
       },
       {
         "key": "executions_per_trial",
@@ -47,7 +47,7 @@
       },
       {
         "key": "patience",
-        "value\r": "3\r"
+        "value\r": "4\r"
       },
       {
         "key": "factor",
@@ -59,7 +59,7 @@
       },
       {
         "key": "epochs",
-        "value\r": "100\r"
+        "value\r": "80\r"
       },
       {
         "key": "batch_size",

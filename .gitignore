@@ -44,3 +44,19 @@ untitled_project/training_vx.py
 test_yf.py
 __pycache__/local.cpython-312.pyc
 ~$rategieën om overfitting te verminderen.docx
+batch_upload.py
+run_predict.bat
+ai_agent/agent.py
+.gitignore
+ai_agent/test_env.py
+conv_to_tflite.py
+ai_agent/logs/agent.log
+ai_agent/models/__pycache__/predictor.cpython-312.pyc
+ai_agent/models/predictor.py
+ai_agent/__pycache__/utils.cpython-312.pyc
+ai_agent/__pycache__/config.cpython-312.pyc
+ai_agent/models/__pycache__/trainer.cpython-312.pyc
+ai_agent/utils.py
+ai_agent/config.py
+__pycache__/local.cpython-312.pyc
+__pycache__/local.cpython-312.pyc

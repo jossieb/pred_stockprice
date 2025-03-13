@@ -5,7 +5,7 @@ and generates predictions for stock prices.
 
 Author: Jos van der Have aka jossieb
 Date: 2025 Q1
-Version: 5.0 03-03-2025
+Version: 6.0
 License: MIT
 Example: python predict.py DGTL.MI local 1
 """
@@ -25,15 +25,18 @@ import sys
 import argparse
 import numpy as np
 import pandas as pd
-import talib
+import pandas_ta as ta
+
+# import talib
 import joblib
 import yfinance as yf
-from sklearn.preprocessing import RobustScaler
 import tensorflow as tf
 from tensorflow.keras.saving import register_keras_serializable
 import local
 import json
 import get_news
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 def parse_arguments():
     """Parse command-line arguments for stock symbol, data type, and run number."""
@@ -121,28 +124,27 @@ def add_technical_indicators(data):
     if len(data) < 52:
         raise ValueError("Not enough data to calculate technical indicators")
     else:
-        data["obv"] = talib.OBV(data["close"], data["volume"])
-        data["rsi"] = talib.RSI(data["close"], timeperiod=14)
-        data["macd"] = talib.MACD(
-            data["close"], fastperiod=12, slowperiod=26, signalperiod=9
-        )[0]
-        data["adx"] = talib.ADX(data["high"], data["low"], data["close"], timeperiod=14)
-        data["sma_14"] = talib.SMA(data["close"], timeperiod=14)
-        data["ema_14"] = talib.EMA(data["close"], timeperiod=14)
-        data["bollinger_high"] = talib.BBANDS(
-            data["close"], timeperiod=14, nbdevup=2, nbdevdn=2, matype=0
-        )[0]
-        data["bollinger_low"] = talib.BBANDS(
-            data["close"], timeperiod=14, nbdevup=2, nbdevdn=2, matype=0
-        )[2]
-        data["stoch_oscillator"] = talib.STOCH(
-            data["high"],
-            data["low"],
-            data["close"],
-            fastk_period=14,
-            slowk_period=3,
-            slowd_period=3,
-        )[0]
+        # On-Balance Volume (OBV)
+        data["obv"] = ta.obv(data["close"], data["volume"])
+        # Relative Strength Index (RSI)
+        data["rsi"] = ta.rsi(data["close"], length=14)
+        # Moving Average Convergence Divergence (MACD)
+        macd = ta.macd(data["close"], fast=12, slow=26, signal=9)
+        data["macd"] = macd["MACD_12_26_9"]
+        # Average Directional Index (ADX)
+        adx = ta.adx(data["high"], data["low"], data["close"], length=14)
+        data["adx"] = adx["ADX_14"]
+        # Simple Moving Average (SMA)
+        data["sma_14"] = ta.sma(data["close"], length=14)
+        # Exponential Moving Average (EMA)
+        data["ema_14"] = ta.ema(data["close"], length=14)
+        # Bollinger Bands
+        bbands = ta.bbands(data["close"], length=14, std=2)
+        data["bollinger_high"] = bbands["BBU_14_2.0"]
+        data["bollinger_low"] = bbands["BBL_14_2.0"]
+        # Stochastic Oscillator
+        stoch = ta.stoch(data["high"], data["low"], data["close"], k=14, d=3)
+        data["stoch_oscillator"] = stoch["STOCHk_14_3_3"]
 
     return data
 
@@ -152,11 +154,12 @@ def preprocess_data(data, scaler, features, seq_length):
     data_subset = data[features].dropna()
     data_scaled = scaler.fit_transform(data_subset)
 
-    x, y = [], []
+    x, y_close, y_trend = [], [], []
     for i in range(len(data_scaled) - seq_length):
         x.append(data_scaled[i : i + seq_length])
-        y.append(data_scaled[i + seq_length, features.index("close")])
-    return np.array(x), np.array(y)
+        y_close.append(data_scaled[i + seq_length, features.index("close")])
+        y_trend.append(data_scaled[i + seq_length, features.index("daily_trend")])
+    return np.array(x), np.array(y_close), np.array(y_trend)
 
 
 @register_keras_serializable()
@@ -190,36 +193,57 @@ def load_model_and_scaler(symbol, run_nr):
     return model, scaler
 
 
-def generate_predictions(model, scaler, x, y, next_working_day, seq_length):
+def generate_predictions(
+    data, model, scaler, x, y_close, y_trend, next_working_day, seq_length
+):
     global symbol, features
 
     """Make predictions"""
 
     predictions = model.predict(x)
+    predictions_close = predictions[0]
+    predictions_trend = predictions[1]
 
     # Create an array with the same shape as the original data used for scaling
-    predictions_full = np.zeros((predictions.shape[0], len(features)))
-    predictions_full[:, features.index("close")] = predictions[:, 0].flatten()
+    predictions_full = np.zeros((predictions_close.shape[0], len(features)))
+    predictions_full[:, features.index("close")] = predictions_close.flatten()
+    predictions_full[:, features.index("daily_trend")] = predictions_trend.flatten()
 
     # Inverse scale the predictions
-    predictions_rescaled = scaler.inverse_transform(predictions_full)[
-        :, features.index("close")
-    ]
+    predictions_rescaled = scaler.inverse_transform(predictions_full)
+    # Get the last prediction
+    predicted_close = predictions_rescaled[-1, features.index("close")]
+    predicted_trend = predictions_rescaled[-1, features.index("daily_trend")]
+
+    # bepaal verschil laatste met voorspelde
+    last_close = data["close"].values[-1]
+    verschil = predicted_close - last_close
+    verandering = (verschil / predicted_close) * 100  # % verandering
+
+    # Converteer next_working_day naar een string in het formaat y-m-d
+    next_working_day_str = next_working_day.strftime("%Y-%m-%d")
 
     # Save predictions to CSV
     predictions_df = pd.DataFrame(
         {
             "symbol": symbol,
-            "date": [next_working_day],
-            "predicted_close": [predictions_rescaled[-1]],
+            "date": [next_working_day_str],
+            "predicted_close": [predicted_close],
+            "verandering": [verandering],
         }
     )
 
     print(
         "Predicted price for the next working day:",
-        [next_working_day],
+        next_working_day_str,
         "Eur:",
-        predictions_rescaled[-1],
+        predicted_close,
+    )
+    print(
+        "Difference in percentage for the next working day:",
+        next_working_day_str,
+        "%:",
+        verandering,
     )
 
     pred_path = os.path.join(local.dfolder, f"{symbol}_{local.predfile}")
@@ -236,7 +260,123 @@ def generate_predictions(model, scaler, x, y, next_working_day, seq_length):
         )
     print(f"Prediction saved to: {pred_path}")
 
-    return predictions_rescaled[-1]
+    # beeld de stijging/daling af in een kleurenspectrum
+    # Definieer het kleurenspectrum
+    cmap = mcolors.LinearSegmentedColormap.from_list("mycmap", ["red", "green"])
+
+    # Verkrijg de kleur uit het kleurenspectrum
+    color = cmap(verandering)
+
+    # Maak een figuur en assen
+    fig, ax = plt.subplots(figsize=(10, 3))
+    # Voeg titel toe
+    ax.set_title(
+        "Voorspelde Koersverandering in %", fontsize=16, fontweight="bold", pad=20
+    )
+
+    # Toon het constante kleurenspectrum als achtergrond
+    gradient = np.linspace(0, 1, 256)
+    ax.imshow(np.array([gradient]), aspect="auto", cmap=cmap, extent=[-10, 10, 0, 1])
+    # Voeg labels toe
+    ax.text(-6, 1.05, "DALEN", ha="center", va="center", fontsize=12, fontweight="bold")
+    ax.text(
+        0,
+        1.05,
+        "NEUTRAAL",
+        ha="center",
+        va="center",
+        fontsize=12,
+        fontweight="bold",
+    )
+    ax.text(
+        6, 1.05, "STIJGEN", ha="center", va="center", fontsize=12, fontweight="bold"
+    )
+    # Toon de trendwaarde als een verticale lijn
+    ax.axvline(x=verandering, color="black", linestyle="--", linewidth=2)
+
+    # Voeg trendwaarde, datum en koers toe als tekst
+    ax.text(
+        verandering,
+        0.5,
+        f"Koers: EUR {predicted_close:.2f}\nVerandering: {verandering:.2f}%\nDatum: {next_working_day_str}",
+        ha="center",
+        va="center",
+        fontsize=10,
+        color="black",
+        bbox=dict(facecolor="white", alpha=0.5),
+    )
+
+    # Verwijder assen en ticks
+    ax.set_yticks([])
+    ax.set_ylim(0, 1)
+
+    # Pas x-as aan
+    ax.set_xlim(-10, 10)
+    ax.set_xticks([-10, 0, 10])  # Toon x-as markeringen
+
+    # Verwijder de randen van de plot
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["bottom"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    plt.tight_layout()
+
+    plot_path = os.path.join(local.dfolder, f"{symbol}_nextday_trend.png")
+    plt.savefig(plot_path, dpi=300)
+    plt.close()
+
+    return predicted_close, predicted_trend
+
+
+def plot_predict_reality(symbol, next_working_day):
+    data_path = os.path.join(local.dfolder, f"{symbol}_{local.csvfile}")
+    pred_path = os.path.join(local.dfolder, f"{symbol}_{local.predfile}")
+
+    # Converteer next_working_day naar een string in het formaat y-m-d
+    next_working_day_str = next_working_day.strftime("%Y-%m-%d")
+
+    # Lees de gegevens uit de tekstbestanden
+    df_predicted = pd.read_csv(pred_path)
+    df_actual = pd.read_csv(data_path)
+    # Zet de datumkolommen om in datetime-objecten
+    df_predicted["date"] = pd.to_datetime(df_predicted["date"])
+    df_actual["date"] = pd.to_datetime(df_actual["date"])
+    # Filter de gegevens vanaf 2025-01-01
+    df_predicted = df_predicted[df_predicted["date"] >= "2025-03-01"]
+    df_actual = df_actual[df_actual["date"] >= "2025-03-01"]
+    # Maak de plot
+    plt.figure(figsize=(12, 6))
+
+    plt.plot(
+        df_predicted["date"],
+        df_predicted["predicted_close"],
+        label="Voorspelde slotkoers",
+    )
+    plt.plot(df_actual["date"], df_actual["close"], label="Werkelijke slotkoers")
+    # Voeg de voorspelde waarde voor next working day handmatig toe
+    plt.scatter(
+        pd.to_datetime(next_working_day_str),
+        df_predicted[df_predicted["date"] == pd.to_datetime(next_working_day_str)][
+            "predicted_close"
+        ].values[0],
+        color="blue",
+    )
+
+    # Voeg labels en een titel toe
+    plt.xlabel("Datum")
+    plt.ylabel("Slotkoers")
+    plt.title("Voorspelde vs. Werkelijke slotkoers")
+
+    # Voeg een legenda toe
+    plt.legend()
+    # Stel de x-as expliciet in
+
+    plt.xlim(pd.to_datetime("2025-03-03"), df_predicted["date"].max())
+    plt.grid(True)
+    plot_path = os.path.join(local.dfolder, f"{symbol}_predict_reality.png")
+
+    plt.savefig(plot_path, dpi=300)
+    plt.close()
 
 
 def main():
@@ -284,6 +424,10 @@ def main():
     data = load_data(symbol, data_type, myrows)
     data = add_technical_indicators(data)
     data["daily_return"] = data["close"].pct_change()
+    # add the daily trend (up/down)
+    max_abs_change = data["daily_return"].abs().max()
+    data["daily_trend"] = data["daily_return"] / max_abs_change
+    data["daily_trend"] = data["daily_trend"].fillna(0)
 
     features = [
         "close",
@@ -298,10 +442,11 @@ def main():
         "bollinger_low",
         "stoch_oscillator",
         "sentiment",
+        "daily_trend",
     ]
 
     model, scaler = load_model_and_scaler(symbol, run_nr)
-    x, y = preprocess_data(data, scaler, features, seq_length=40)
+    x, y_close, y_trend = preprocess_data(data, scaler, features, seq_length=40)
 
     # Get the last date from the data
     data = data.reset_index()  # use date as regular column to get the last one in
@@ -318,13 +463,17 @@ def main():
         next_working_day += timedelta(days=1)
 
     generate_predictions(
+        data,
         model,
         scaler,
         x,
-        y,
+        y_close,
+        y_trend,
         next_working_day,
         seq_length=40,
     )
+
+    plot_predict_reality(symbol, next_working_day)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ The best model and scaler are saved for future use.
 
 Author: Jos van der Have aka jossieb
 Date: 2025 Q1
-Version: 5.0 / 03-03-2025
+Version: 6.0
 License: MIT
 Example: python training.py DGTL.MI local 1
 """
@@ -24,7 +24,8 @@ import joblib
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import talib
+# import talib
+import pandas_ta as ta
 import yfinance as yf
 from datetime import date, timedelta
 from sklearn.preprocessing import RobustScaler
@@ -144,28 +145,27 @@ def add_technical_indicators(data):
     if len(data) < 52:
         raise ValueError("Not enough data to calculate technical indicators")
     else:
-        data["obv"] = talib.OBV(data["close"], data["volume"])
-        data["rsi"] = talib.RSI(data["close"], timeperiod=14)
-        data["macd"] = talib.MACD(
-            data["close"], fastperiod=12, slowperiod=26, signalperiod=9
-        )[0]
-        data["adx"] = talib.ADX(data["high"], data["low"], data["close"], timeperiod=14)
-        data["sma_14"] = talib.SMA(data["close"], timeperiod=14)
-        data["ema_14"] = talib.EMA(data["close"], timeperiod=14)
-        data["bollinger_high"] = talib.BBANDS(
-            data["close"], timeperiod=14, nbdevup=2, nbdevdn=2, matype=0
-        )[0]
-        data["bollinger_low"] = talib.BBANDS(
-            data["close"], timeperiod=14, nbdevup=2, nbdevdn=2, matype=0
-        )[2]
-        data["stoch_oscillator"] = talib.STOCH(
-            data["high"],
-            data["low"],
-            data["close"],
-            fastk_period=14,
-            slowk_period=3,
-            slowd_period=3,
-        )[0]
+        # On-Balance Volume (OBV)
+        data["obv"] = ta.obv(data["close"], data["volume"])
+        # Relative Strength Index (RSI)
+        data["rsi"] = ta.rsi(data["close"], length=14)
+        # Moving Average Convergence Divergence (MACD)
+        macd = ta.macd(data["close"], fast=12, slow=26, signal=9)
+        data["macd"] = macd["MACD_12_26_9"]
+        # Average Directional Index (ADX)
+        adx = ta.adx(data["high"], data["low"], data["close"], length=14)
+        data["adx"] = adx["ADX_14"]
+        # Simple Moving Average (SMA)
+        data["sma_14"] = ta.sma(data["close"], length=14)
+        # Exponential Moving Average (EMA)
+        data["ema_14"] = ta.ema(data["close"], length=14)
+        # Bollinger Bands
+        bbands = ta.bbands(data["close"], length=14, std=2)
+        data["bollinger_high"] = bbands["BBU_14_2.0"]
+        data["bollinger_low"] = bbands["BBL_14_2.0"]
+        # Stochastic Oscillator
+        stoch = ta.stoch(data["high"], data["low"], data["close"], k=14, d=3)
+        data["stoch_oscillator"] = stoch["STOCHk_14_3_3"]
 
     return data
 
@@ -179,18 +179,19 @@ def preprocess_data(data, seq_length):
     noise = np.random.normal(0, mynoise, data_scaled.shape)
     data_scaled_noisy = data_scaled + noise
 
-    x, y = [], []
+    x, y_close, y_trend = [], [], []
     for i in range(len(data_scaled_noisy) - seq_length):
         x.append(data_scaled_noisy[i : i + seq_length])
-        y.append(data_scaled_noisy[i + seq_length, features.index("close")])
+        y_close.append(data_scaled_noisy[i + seq_length, features.index("close")])
+        y_trend.append(data_scaled_noisy[i + seq_length, features.index("daily_trend")])
 
     # Check if the dataset is empty after preprocessing
-    if len(x) == 0 or len(y) == 0:
+    if len(x) == 0 or len(y_close) == 0 or len(y_trend) == 0:
         raise ValueError(
             "The dataset is empty after preprocessing. Please check the data and preprocessing steps."
         )
 
-    return np.array(x), np.array(y), scaler
+    return np.array(x), np.array(y_close), np.array(y_trend), scaler
 
 
 # Build model for hyperparameter tuning
@@ -214,19 +215,42 @@ def build_model(hp):
         inputs[:, -1, :]
     )  # Project input naar juiste dimensie
     enhanced = Add()([combined, skip_connection])  # Skip connection
-    outputs = Dense(1, kernel_regularizer=l2(0.01))(enhanced)
 
-    model = tf.keras.models.Model(inputs, outputs)
+    # Output voor slotkoers
+    output_close = Dense(1, kernel_regularizer=l2(0.01), name="close_output")(enhanced)
+    # Output voor trend
+    output_trend = Dense(1, kernel_regularizer=l2(0.01), name="trend_output")(enhanced)
+
+    model = tf.keras.models.Model(inputs, [output_close, output_trend])
     model.compile(
         optimizer=Adam(learning_rate=hp.Float("lr", mylearning_rate, 1e-2)),
-        loss=weighted_mse_exp,
-        metrics=["mse"],
+        loss={"close_output": weighted_mse_exp, "trend_output": weighted_mse_exp},
+        metrics={"close_output": "mse", "trend_output": "mse"},
     )
     return model
 
 
+def plot_daily_trend(data, symbol):
+    """Plot the daily trend with green for increases and red for decreases."""
+    plt.figure(figsize=(12, 6))
+    plt.title(f"Daily Trend for {symbol}")
+    plt.xlabel("Date")
+    plt.ylabel("Daily Trend")
+
+    # Plot stijgingen in groen
+    plt.bar(
+        data.index,
+        data["daily_trend"],
+        color=data["daily_trend"].apply(lambda x: "green" if x > 0 else "red"),
+    )
+    plt.grid(True)
+    plot_path = os.path.join(local.dfolder, f"{symbol}_daily_trend.png")
+    plt.savefig(plot_path, dpi=300)
+    plt.close()
+
+
 # Plot training history
-def plot_training_history(history, run_nr):
+def plot_training_history(history, run_nr, symbol):
     """Plot training and validation loss."""
     plt.figure(figsize=(12, 5))
     plt.plot(history.history["loss"], label="Train Loss")
@@ -235,7 +259,8 @@ def plot_training_history(history, run_nr):
     plt.ylabel("Loss")
     plt.title("Training vs Validation Loss")
     plt.legend()
-    plt.savefig(f"accuracy_{run_nr}.png", dpi=300)
+    plot_path = os.path.join(local.dfolder, f"{symbol}_accuracy_{run_nr}.png")
+    plt.savefig(plot_path, dpi=300)
     plt.close()
 
 
@@ -246,7 +271,7 @@ def main():
 
     if not all([symbol, data_type, run_nr]):
         print("Please provide all required arguments: symbol, data_type, and run_nr.")
-        sys.exit(1)
+        sys.exit(2)
 
     print(f"Symbol: {symbol}, Type: {data_type}, Run: {run_nr}")
 
@@ -279,7 +304,15 @@ def main():
 
     data = load_data(symbol, data_type, myrows)
     data = add_technical_indicators(data)
+    # add the daily change
     data["daily_return"] = data["close"].pct_change()
+    # add the daily trend (up/down)
+    max_abs_change = data["daily_return"].abs().max()
+    data["daily_trend"] = data["daily_return"] / max_abs_change
+    data["daily_trend"] = data["daily_trend"].fillna(0)
+    # store the complete file including all features
+    data_path = os.path.join(local.dfolder, f"{symbol}_{local.allfile}")
+    data.to_csv(data_path, index=False)
 
     global features
     features = [
@@ -295,11 +328,12 @@ def main():
         "bollinger_low",
         "stoch_oscillator",
         "sentiment",
+        "daily_trend",
     ]
 
-    x, y, scaler = preprocess_data(data, seq_length=40)
-    x_train, x_test, y_train, y_test = train_test_split(
-        x, y, test_size=mytest_size, shuffle=False
+    x, y_close, y_trend, scaler = preprocess_data(data, seq_length=40)
+    x_train, x_test, y_train_close, y_test_close, y_train_trend, y_test_trend = (
+        train_test_split(x, y_close, y_trend, test_size=mytest_size, shuffle=False)
     )
 
     if os.path.exists("keras_tuner"):
@@ -326,23 +360,29 @@ def main():
     try:
         tuner.search(
             x_train,
-            y_train,
+            {"close_output": y_train_close, "trend_output": y_train_trend},
             epochs=myepochs,
             batch_size=mybatch_size,
-            validation_data=(x_test, y_test),
+            validation_data=(
+                x_test,
+                {"close_output": y_test_close, "trend_output": y_test_trend},
+            ),
             callbacks=[early_stopping, reduce_lr],
         )
     except Exception as e:
         print(f"Error during hyperparameter tuning: {e}")
-        sys.exit(1)
+        sys.exit(3)
 
     best_model = tuner.get_best_models(num_models=1)[0]
     history = best_model.fit(
         x_train,
-        y_train,
+        {"close_output": y_train_close, "trend_output": y_train_trend},
         epochs=myepochs,
         batch_size=mybatch_size,
-        validation_data=(x_test, y_test),
+        validation_data=(
+            x_test,
+            {"close_output": y_test_close, "trend_output": y_test_trend},
+        ),
         callbacks=[early_stopping, reduce_lr],
     )
 
@@ -353,7 +393,11 @@ def main():
     print(f"Best model saved to: {model_path}")
     print(f"Scaler saved to: {scaler_path}")
 
-    plot_training_history(history, run_nr)
+    # Plot the training vs validatie
+    plot_training_history(history, run_nr, symbol)
+
+    # Plot the daily trend
+    plot_daily_trend(data, symbol)
 
 
 if __name__ == "__main__":
