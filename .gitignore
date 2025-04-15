@@ -11,8 +11,10 @@
 model_output/
 data_output/
 keras_tuner/
+ai_agent/ 
 /local.py
 *old*
+*.txt
 *_v*
 training_v6.py
 ball.jpg
@@ -60,3 +62,5 @@ ai_agent/utils.py
 ai_agent/config.py
 __pycache__/local.cpython-312.pyc
 __pycache__/local.cpython-312.pyc
+__pycache__/local.cpython-312.pyc
+.gitignore

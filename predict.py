@@ -7,7 +7,7 @@ Author: Jos van der Have aka jossieb
 Date: 2025 Q1
 Version: 6.0
 License: MIT
-Example: python predict.py DGTL.MI local 1
+Example: python predict.py AD.AS yahoo 1
 """
 
 import warnings
@@ -37,6 +37,8 @@ import json
 import get_news
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import requests
+from urllib.parse import urljoin
 
 def parse_arguments():
     """Parse command-line arguments for stock symbol, data type, and run number."""
@@ -379,6 +381,48 @@ def plot_predict_reality(symbol, next_working_day):
     plt.close()
 
 
+def sent_png_to_pyan(symbol):
+    """Send the generated plots to PYTHONANYWHERE server."""
+
+    username = "stillhaveit"
+    api_token = local.pan_key
+    pythonanywhere_host = "www.pythonanywhere.com"
+    api_base = "https://{pythonanywhere_host}/api/v0/user/{username}/".format(
+        pythonanywhere_host=pythonanywhere_host,
+        username=username,
+    )
+
+    resp = requests.post(
+        urljoin(
+            api_base,
+            "files/path/home/{username}/static/AD.AS_nextday_trend.png".format(
+                username=username
+            ),
+        ),
+        files={"content": open("data_output/AD.AS_nextday_trend.png", "rb")},
+        headers={"Authorization": "Token {api_token}".format(api_token=api_token)},
+    )
+    print(
+        "AD.AS_nextday_trend.png send to Pythonanywhere, status: "
+        + str(resp.status_code)
+    )
+
+    resp = requests.post(
+        urljoin(
+            api_base,
+            "files/path/home/{username}/static/AD.AS_predict_reality.png".format(
+                username=username
+            ),
+        ),
+        files={"content": open("data_output/AD.AS_predict_reality.png", "rb")},
+        headers={"Authorization": "Token {api_token}".format(api_token=api_token)},
+    )
+    print(
+        "AD.AS_predict_reality.png send to Pythonanywhere, status: "
+        + str(resp.status_code)
+    )
+
+
 def main():
     # Declare run_nr, symbol and features as global to access it inside other functions
     global run_nr, symbol, features, myweight
@@ -474,6 +518,8 @@ def main():
     )
 
     plot_predict_reality(symbol, next_working_day)
+
+    sent_png_to_pyan(symbol)
 
 
 if __name__ == "__main__":
